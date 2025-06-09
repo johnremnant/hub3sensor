@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h2>Sensor Config</h2>
+  <form action="/save2" method="POST">
+    MESH ID (decimal): <input name='mesh'><br>
+
+    <label for="cat">Sender Group:</label>
+    <select name="cat" id="cat">
+      {{GROUP_OPTIONS}}
+    </select><br><br>
+
+    <label for="sensor">Sensor Type:</label>
+    <select name="sensor" id="sensor">
+      {{SENSOR_OPTIONS}}
+    </select><br><br>
+
+    <label for="ldr">Enable LDR Sensor:</label>
+    <select name="ldr" id="ldr">
+      <option value="0" {{LDR_OFF}}>Disabled</option>
+      <option value="1" {{LDR_ON}}>Enabled</option>
+    </select><br><br>
+
+    <input type='submit' value='Save Config'>
+  </form>
+
+  <hr>
+  <a href="/update.html">Firmware Update</a>
+</body>
+</html>

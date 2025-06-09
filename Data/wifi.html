@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h2>Configure WiFi</h2>
+  <form method='POST' action='/save'>
+    <label>SSID: </label>
+    <select name='ssid'>
+      {{SSID_OPTIONS}}
+    </select><br>
+    <label>Password: </label>
+    <input type='password' name='pass'><br>
+    <input type='submit' value='Save'>
+  </form>
+</body>
+</html>
