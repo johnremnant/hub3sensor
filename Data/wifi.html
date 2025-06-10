@@ -11,5 +11,27 @@
     <input type='password' name='pass'><br>
     <input type='submit' value='Save'>
   </form>
+  
+<p id="timeoutWarning" style="font-weight:bold; color:red;"></p>
+
+<script>
+  const duration = 120; // seconds
+  let remaining = duration;
+
+  const countdown = setInterval(() => {
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    document.getElementById("timeoutWarning").textContent =
+      `This page will close in ${minutes}:${seconds < 10 ? '0' : ''}${seconds} to preserve battery.`;
+    remaining--;
+
+    if (remaining < 0) {
+      clearInterval(countdown);
+      document.getElementById("timeoutWarning").textContent =
+        "Shutting down...";
+    }
+  }, 1000);
+</script>
+
 </body>
 </html>

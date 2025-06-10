@@ -2,6 +2,7 @@
 #include "pins.h"
 #include "sensor_types.h"
 
+
 extern ESP8266WebServer server;
 extern ESP8266HTTPUpdateServer httpUpdater;
 extern const char* version;
@@ -23,11 +24,32 @@ String loadHtml(const char* path, const String& placeholder, const String& value
 
 String getSSIDOptions() {
   String ssidOptions = "";
-  int n = WiFi.scanNetworks();
-  if (n == 0) {
+  int scanResult = WiFi.scanComplete();
+
+  if (scanResult == WIFI_SCAN_FAILED || scanResult == -1) {
+    WiFi.scanNetworks(true);  // Start async scan
+    unsigned long startTime = millis();
+    const unsigned long timeout = 120000; // 120 seconds
+
+    while (millis() - startTime < timeout) {
+      scanResult = WiFi.scanComplete();
+      if (scanResult >= 0) break;
+      delay(100);
+    }
+
+    if (scanResult == -1 || scanResult == WIFI_SCAN_FAILED) {
+#ifdef DEBUG_FLAG
+      Serial.println("SSID scan timed out.");
+#endif
+      ssidOptions += "<option>Scan timeout</option>";
+      return ssidOptions;
+    }
+  }
+
+  if (scanResult == 0) {
     ssidOptions += "<option>No networks found</option>";
   } else {
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < scanResult; ++i) {
       ssidOptions += "<option value='";
       ssidOptions += WiFi.SSID(i);
       ssidOptions += "'>";
@@ -35,8 +57,11 @@ String getSSIDOptions() {
       ssidOptions += "</option>";
     }
   }
+
+  WiFi.scanDelete();  // Clear memory
   return ssidOptions;
 }
+
 
 String getGroupOptions(byte selectedGroup) {
   String options = "";
@@ -200,12 +225,14 @@ void enterConfigMode() {
       String password = server.arg("pass");
       byte sensor_type = server.arg("sensor").toInt();
       bool ldr_enabled = server.arg("ldr") == "1";
+  #ifdef DEBUG_FLAG
       Serial.println("Save button clicked. Preparing to save config1...");
-
+  #endif
       saveConfig(ssid, password, config.mesh_id, config.category_id,  version, date, sensor_type, ldr_enabled);
       server.send(200, "text/html", "<h3>Wi-Fi Settings saved. Restarting...</h3>");
       delay(2000);
-      ESP.restart();
+     digitalWrite(donePin, LOW); // cut power to the ESP
+
     });
 
     httpUpdater.setup(&server);
@@ -217,7 +244,8 @@ void enterConfigMode() {
       yield();
     }
 
-    ESP.restart();
+    digitalWrite(donePin, LOW); // cut power to the ESP
+
   }
 
   WiFi.mode(WIFI_STA);
@@ -240,7 +268,7 @@ void enterConfigMode() {
 
   server.on("/config", HTTP_GET, []() {
   String html = loadHtml("/config.html", "{{GROUP_OPTIONS}}", getGroupOptions(config.category_id));
-  html.replace("{{SENSOR_OPTIONS}}", getSensorOptions(config.sensor_type));  // <== this line
+  html.replace("{{SENSOR_OPTIONS}}", getSensorOptions(config.sensor_type));  
   injectLDROptions(html, config.ldr_enabled);
   server.send(200, "text/html", html);
 });
@@ -255,12 +283,13 @@ void enterConfigMode() {
     byte cat = server.arg("cat").toInt();
     byte sensor_type = server.arg("sensor").toInt();
     bool ldr_enabled = server.arg("ldr") == "1";
+#ifdef DEBUG_FLAG	
     Serial.println("Save button clicked. Preparing to save config2...");
-
+#endif
     saveConfig(config.ssid, config.password, mesh, cat, version, date, sensor_type, ldr_enabled);
     server.send(200, "text/html", "<h3>Settings saved. Restarting...</h3>");
     delay(2000);
-    ESP.restart();
+    digitalWrite(donePin, LOW); // cut power to the ESP
   });
 
   httpUpdater.setup(&server);
@@ -285,5 +314,6 @@ void enterConfigMode() {
   }
 
   digitalWrite(ledPin, LOW);
-  ESP.restart();
+  digitalWrite(donePin, LOW); // cut power to the ESP
+
 }

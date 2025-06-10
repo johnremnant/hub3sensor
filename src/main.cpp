@@ -26,7 +26,7 @@ Version logs
  v2.2.3 trying to fix LDR enabled issue 
  v2.2.4 Migrate to PlatformIO project 
  
- ##### increment version and date when changes are made #####
+ ##### increment version when changes are made #####
 
 
    ================================================================================================================================================== */
@@ -41,7 +41,7 @@ enum State {
   ENTER_CONFIG_MODE,
   SLEEP
 };
-#define DEBUG_FLAG
+
 // put function declarations here:
 void setup();
 void loop();
@@ -65,13 +65,11 @@ float readBatteryVoltage();
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+// sensor configs etc - stored locally in the project 
 #include "pins.h"
-// to cater for OTA uploads
 #include "sensor_types.h"
-#include <Updater.h>
 #include "config_web.h"
 #include "sensor_manager.h"
-
 #include "sensor_dht.h"
 #include "sensor_bme280.h"
 #include "sensor_ds18b20.h"
@@ -80,13 +78,14 @@ float readBatteryVoltage();
 #include "sensor_bmp180.h"
 #include "sensor_ldr.h"
 
-
- SensorType currentSensor;
+// to cater for OTA uploads
+#include <Updater.h>
 
 /****** Configuration variables *****/
 #define CONFIG_PATH "/config.json"
 #define CONFIG_MODE_TIMEOUT 3000  // Config button needs to be pressed for 3 secs to enter Config mode
 
+SensorType currentSensor;
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer httpUpdater;
 ConfigData config;
@@ -142,7 +141,7 @@ void setup() {
   }
 
    
-  // read config optins from LitleFS
+  // read config options from LittleFS
 
   File file = LittleFS.open(CONFIG_PATH, "r");
   if (file) {
@@ -171,7 +170,7 @@ void setup() {
       Serial.println(date);
             
       Serial.print("Raw config content: ");
-Serial.println(content);
+      Serial.println(content);
 #endif
     } else {
 #ifdef DEBUG_FLAG
@@ -262,6 +261,7 @@ void loop() {
 /* ############################End of Loop ##################################### */
 // put function definitions here:
 void sendReading() {
+	
   /**** Create the ESPnow message values ******/
   Now_msg.mesh_id = mesh_id1;
   Now_msg.category = category_id1;  // Change the Group name to what is appropriate for this sender
@@ -273,25 +273,21 @@ void sendReading() {
   readSensor(static_cast<SensorType>(config.sensor_type), temperature, humidity);
 
   Now_msg.temperature = temperature;
-  Now_msg.humidity = humidity; //on BMP280 and oterh temp sensors this is not avaialble
+  Now_msg.humidity = humidity; //on BMP280 and other temp sensors this is not avaialble
 //we are noot currently using the pressure reading from the BMx devices 
 
-
-
-  digitalWrite(muxSel, LOW);
+  digitalWrite(muxSel, LOW); // just to make sure we are reading the Voltage 
   delay(5);                                     // Allow settling time
   Now_msg.battery = readBatteryVoltage();
 
-  //float light = 0.0;
+  //now read the light level if the LDR is enabled 
   Now_msg.light = readLDRSensor(config.ldr_enabled);
-
-
   /**** Create the ESPnow message values end ******/
 
   // now send the ESPnow meassage
   esp_now_send(receiverAddress, (uint8_t*)&Now_msg, sizeof(Now_msg));
 }
-
+// It doesn't verify the message just reports that it was sent 
 void OnDataSent(uint8_t* mac_addr, uint8_t sendStatus) {
   ack_received = (sendStatus == 0);  // 0 = success
 #ifdef DEBUG_FLAG

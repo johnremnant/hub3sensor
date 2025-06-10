@@ -1,9 +1,14 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sensor Config</title>
+</head>
 <body>
   <h2>Sensor Config</h2>
   <form action="/save2" method="POST">
-    MESH ID (decimal): <input name='mesh'><br>
+    <label for="mesh">MESH ID (decimal):</label>
+    <input name="mesh" id="mesh"><br><br>
 
     <label for="cat">Sender Group:</label>
     <select name="cat" id="cat">
@@ -21,10 +26,31 @@
       <option value="1" {{LDR_ON}}>Enabled</option>
     </select><br><br>
 
-    <input type='submit' value='Save Config'>
+    <input type="submit" value="Save Config">
   </form>
+
+   <p id="timeoutWarning" style="font-weight:bold; color:red;"></p>
 
   <hr>
   <a href="/update.html">Firmware Update</a>
+
+  <script>
+    const duration = 180;
+    let remaining = duration;
+
+    const countdown = setInterval(() => {
+      const minutes = Math.floor(remaining / 60);
+      const seconds = remaining % 60;
+      document.getElementById("timeoutWarning").textContent =
+        `This page will close in ${minutes}:${seconds < 10 ? '0' : ''}${seconds} to preserve battery.`;
+      remaining--;
+
+      if (remaining < 0) {
+        clearInterval(countdown);
+        document.getElementById("timeoutWarning").textContent =
+          "Shutting down...";
+      }
+    }, 1000);
+  </script>
 </body>
 </html>
