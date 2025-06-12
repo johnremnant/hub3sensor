@@ -1,8 +1,9 @@
 #include "config_web.h"
 #include "pins.h"
 #include "sensor_types.h"
+#include "debug_log.h"
 
-
+extern bool debugEnabled;
 extern ESP8266WebServer server;
 extern ESP8266HTTPUpdateServer httpUpdater;
 extern const char* version;
@@ -38,9 +39,9 @@ String getSSIDOptions() {
     }
 
     if (scanResult == -1 || scanResult == WIFI_SCAN_FAILED) {
-#ifdef DEBUG_FLAG
-      Serial.println("SSID scan timed out.");
-#endif
+ 
+      debugPrintln("SSID scan timed out.");
+ 
       ssidOptions += "<option>Scan timeout</option>";
       return ssidOptions;
     }
@@ -115,9 +116,9 @@ String getSensorOptions(byte selectedSensor) {
 bool loadWifiCredentials(ConfigData& config) {
   File file = LittleFS.open(CONFIG_PATH, "r");
   if (!file) {
-#ifdef DEBUG_FLAG
-    Serial.println("No WiFi config found.");
-#endif
+ 
+    debugPrintln("No WiFi config found.");
+ 
     return false;
   }
 
@@ -126,9 +127,9 @@ bool loadWifiCredentials(ConfigData& config) {
   file.close();
 
   if (err) {
-#ifdef DEBUG_FLAG
-    Serial.println("Failed to parse WiFi config.");
-#endif
+ 
+    debugPrintln("Failed to parse WiFi config.");
+ 
     return false;
   }
 
@@ -167,43 +168,42 @@ void saveConfig(const String& ssid, const String& password,
     serializeJson(doc, configFile);
     configFile.close();
 
-#ifdef DEBUG_FLAG
-    Serial.print("Saved SSID: "); Serial.println(ssid);
-    Serial.print("Saved password: "); Serial.println(password);
-    Serial.println("Config saved.");
-    Serial.print("Saved MESH ID: "); Serial.println(mesh_id1);
-    Serial.print("Saved Category ID: "); Serial.println(category_id1);
-    Serial.print("Saved version: "); Serial.println(version);
-    Serial.print("Saved Uploaded date: "); Serial.println(date);
-    Serial.print("Saved LDR selected: "); Serial.println(ldr_enabled);
-#else
-    Serial.println("saved config succesful.");
-#endif
+ 
+    debugPrint("Saved SSID: "); debugPrintln(ssid);
+    debugPrint("Saved password: "); debugPrintln(password);
+    debugPrintln("Config saved.");
+    debugPrint("Saved MESH ID: "); debugPrintln(mesh_id1);
+    debugPrint("Saved Category ID: "); debugPrintln(category_id1);
+    debugPrint("Saved version: "); debugPrintln(version);
+    debugPrint("Saved Uploaded date: "); debugPrintln(date);
+    debugPrint("Saved LDR selected: "); debugPrintln(ldr_enabled);
+    debugPrintln("saved config succesful.");
+ 
   } else {
-#ifdef DEBUG_FLAG
-    Serial.println("Failed to save config.");
-#endif
+ 
+    debugPrintln("Failed to save config.");
+ 
   }
 }
 
 void enterConfigMode() {
-#ifdef DEBUG_FLAG
-  Serial.println("Entering CONFIG MODE...");
-#endif
+ 
+  debugPrintln("Entering CONFIG MODE...");
+ 
 
   if (!LittleFS.begin()) {
-#ifdef DEBUG_FLAG
-    Serial.println("LittleFS mount failed!");
-#endif
+ 
+    debugPrintln("LittleFS mount failed!");
+ 
     return;
   }
 
   loadWifiCredentials(config);
 
   if (config.ssid.length() == 0) {
-#ifdef DEBUG_FLAG
-    Serial.println("No SSID stored - entering AP mode...");
-#endif
+ 
+    debugPrintln("No SSID stored - entering AP mode...");
+ 
     WiFi.disconnect();
     delay(100);
     WiFi.mode(WIFI_STA);
@@ -224,14 +224,15 @@ void enterConfigMode() {
       String ssid = server.arg("ssid");
       String password = server.arg("pass");
       byte sensor_type = server.arg("sensor").toInt();
-      bool ldr_enabled = server.arg("ldr") == "1";
-  #ifdef DEBUG_FLAG
-      Serial.println("Save button clicked. Preparing to save config1...");
-  #endif
+      bool ldr_enabled = (sensor_type == SENSOR_WITTY) ? true : server.arg("ldr") == "1";
+
+   
+      debugPrintln("Save button clicked. Preparing to save config1...");
+   
       saveConfig(ssid, password, config.mesh_id, config.category_id,  version, date, sensor_type, ldr_enabled);
       server.send(200, "text/html", "<h3>Wi-Fi Settings saved. Restarting...</h3>");
       delay(2000);
-     digitalWrite(donePin, LOW); // cut power to the ESP
+     if (config.sensor_type != SENSOR_WITTY) digitalWrite(donePin, LOW); // cut power to the ESP
 
     });
 
@@ -244,7 +245,7 @@ void enterConfigMode() {
       yield();
     }
 
-    digitalWrite(donePin, LOW); // cut power to the ESP
+   if (config.sensor_type != SENSOR_WITTY) digitalWrite(donePin, LOW); // cut power to the ESP
 
   }
 
@@ -252,14 +253,14 @@ void enterConfigMode() {
   WiFi.begin(config.ssid.c_str(), config.password.c_str());
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    debugPrint(".");
   }
 
-#ifdef DEBUG_FLAG
-  Serial.println("\nWi-Fi connected!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-#endif
+ 
+  debugPrintln("\nWi-Fi connected!");
+  debugPrint("IP Address: ");
+  debugPrintln(WiFi.localIP());
+ 
 
   server.on("/", HTTP_GET, []() {
     server.sendHeader("Location", "/config", true);
@@ -268,7 +269,34 @@ void enterConfigMode() {
 
   server.on("/config", HTTP_GET, []() {
   String html = loadHtml("/config.html", "{{GROUP_OPTIONS}}", getGroupOptions(config.category_id));
-  html.replace("{{SENSOR_OPTIONS}}", getSensorOptions(config.sensor_type));  
+ html.replace("{{SENSOR_OPTIONS}}", getSensorOptions(config.sensor_type));
+
+// Inject JS that enables LDR + disables checkbox if sensor is Witty
+String jsScript = R"rawliteral(
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    const sensorSelect = document.getElementById("sensor");
+    const ldrCheckbox = document.getElementById("ldr");
+
+    function updateLDRState() {
+      const SENSOR_WITTY = 6;
+      const selected = parseInt(sensorSelect.value);
+      if (selected === SENSOR_WITTY) {
+        ldrCheckbox.checked = true;
+        ldrCheckbox.disabled = true;
+      } else {
+        ldrCheckbox.disabled = false;
+      }
+    }
+
+    sensorSelect.addEventListener("change", updateLDRState);
+    updateLDRState();
+  });
+</script>
+)rawliteral";
+
+html += jsScript;
+
   injectLDROptions(html, config.ldr_enabled);
   server.send(200, "text/html", html);
 });
@@ -282,21 +310,22 @@ void enterConfigMode() {
     unsigned long mesh = server.arg("mesh").toInt();
     byte cat = server.arg("cat").toInt();
     byte sensor_type = server.arg("sensor").toInt();
-    bool ldr_enabled = server.arg("ldr") == "1";
-#ifdef DEBUG_FLAG	
-    Serial.println("Save button clicked. Preparing to save config2...");
-#endif
+    bool ldr_enabled = (sensor_type == SENSOR_WITTY) ? true : server.arg("ldr") == "1";
+
+ 	
+    debugPrintln("Save button clicked. Preparing to save config2...");
+ 
     saveConfig(config.ssid, config.password, mesh, cat, version, date, sensor_type, ldr_enabled);
     server.send(200, "text/html", "<h3>Settings saved. Restarting...</h3>");
     delay(2000);
-    digitalWrite(donePin, LOW); // cut power to the ESP
+    if (config.sensor_type != SENSOR_WITTY)digitalWrite(donePin, LOW); // cut power to the ESP
   });
 
   httpUpdater.setup(&server);
   server.begin();
-#ifdef DEBUG_FLAG
-  Serial.println("Web server started.");
-#endif
+ 
+  debugPrintln("Web server started.");
+ 
 
   unsigned long configStart = millis();
   unsigned long lastBlink = 0;
@@ -314,6 +343,6 @@ void enterConfigMode() {
   }
 
   digitalWrite(ledPin, LOW);
-  digitalWrite(donePin, LOW); // cut power to the ESP
+  if (config.sensor_type != SENSOR_WITTY)digitalWrite(donePin, LOW); // cut power to the ESP
 
 }

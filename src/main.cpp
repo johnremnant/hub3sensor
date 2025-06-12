@@ -1,40 +1,41 @@
 /*  ============================================================================================================================================
 
      ESPnow ULP Trigger Sensors (All Sensors)
-     Dual light and battery monitor using a 2 in 1 out Mux 
-     Use a PIR or other sw input to trigger a reading 	 
+     Dual light and battery monitor using a 2 in 1 out Mux
+     Use a PIR or other sw input to trigger a reading
      This SENDER includes Status + Light + Battery + DHT22/SDS18B20 and I2C sensors
-     V2-V3 Swap Pin assignments Pins IO4 and IO13, IO5 and IO12 
-	 For use with V3 and V3.1 PCBs ( the MUX pinout on V3 boards is incorrect. Fit R11 and just read the battery on these boards )
-   And ESP02 PCB V1.0 - Same Pinout just physically differnt 
+     V2-V3 Swap Pin assignments Pins IO4 and IO13, IO5 and IO12
+   For use with V3 and V3.1 PCBs ( the MUX pinout on V3 boards is incorrect. Fit R11 and just read the battery on these boards )
+   And ESP02 PCB V1.0 - Same Pinout just physically differnt
                        ESP12
                       --------------                                               Top      Bottom
                      | RST       TX |                                             ------    ------
           Mux Z ---->| ADC       RX |<----Repurpose as an input ConfigPin         |Vcc |    | D5 |   D0
-                     | CH        05 |---->Spare IO pin or SCL                     |Gnd |    | D4 |   D2 have pads inset from board edge 
+                     | CH        05 |---->Spare IO pin or SCL                     |Gnd |    | D4 |   D2 have pads inset from board edge
                      | 16        04 |---->DHT22 or SDS18B20 or SDA                | RX |    |D13 |
 MUX Sel I0 or I1<----| 14        00 |                                             | Tx |    | A0 |
 Sw/PIR/ Hall effect->| 12        02 |                                             |D12 |    |RST |
         Done Pin<----| 13        15 |                                             |D14 |    ------
-                     | Vcc      GND |                                             ------    
+                     | Vcc      GND |                                             ------
                       --------------
 Version logs
  v2.0.0 add wifi Scan, Config web page and OTA cabability may-25
  v2.0.1 add date and version to the config file
  v2.2.0 Separate the HTML out into spearate files
- v2.2.2 Seperate out all the sensors into their own files 
- v2.2.3 trying to fix LDR enabled issue 
- v2.2.4 Migrate to PlatformIO project 
- 
+ v2.2.2 Seperate out all the sensors into their own files
+ v2.2.3 trying to fix LDR enabled issue
+ v2.2.4 Migrate to PlatformIO project
+ v3.0.0 Add WITTY board as a new Sensor 
+
  ##### increment version when changes are made #####
 
-
-   ================================================================================================================================================== */
+ ================================================================================================================================================== */
 
 #include <Arduino.h>
-const char* version = "2.2.4";  // Define as needed
-const char* date = __DATE__; // Compile date
-enum State {
+const char *version = "3.0.0"; // Define as needed
+const char *date = __DATE__;   // Compile date
+enum State
+{
   INIT,
   WAIT_FOR_ACK,
   CHECK_TIMEOUT,
@@ -42,21 +43,20 @@ enum State {
   SLEEP
 };
 
+extern bool debugEnabled;
+bool debugEnabled = false; // default off, set true to enable debug prints
 // put function declarations here:
 void setup();
 void loop();
 void sendReading();
-void OnDataSent(uint8_t* mac_addr, uint8_t sendStatus);
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus);
 void gotoSleep();
-#ifdef DEBUG_FLAG
-void logState(State state);  // This will now compile
-#endif
+
+void logState(State state); // This will now compile
+
 float readBatteryVoltage();
 
-
-
-
-// Note Battery voltage sensor is always enabled 
+// Note Battery voltage sensor is enabled for all sensors (except WITTY and ESP01 boards)
 
 /**** libary Includes ******/
 #include <ESP8266WiFi.h>
@@ -65,7 +65,7 @@ float readBatteryVoltage();
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
-// sensor configs etc - stored locally in the project 
+// sensor configs etc - stored locally in the project
 #include "pins.h"
 #include "sensor_types.h"
 #include "config_web.h"
@@ -77,13 +77,15 @@ float readBatteryVoltage();
 #include "sensor_mlx90614.h"
 #include "sensor_bmp180.h"
 #include "sensor_ldr.h"
+#include "sensor_witty.h"
+#include "debug_log.h"
 
 // to cater for OTA uploads
 #include <Updater.h>
 
 /****** Configuration variables *****/
 #define CONFIG_PATH "/config.json"
-#define CONFIG_MODE_TIMEOUT 3000  // Config button needs to be pressed for 3 secs to enter Config mode
+#define CONFIG_MODE_TIMEOUT 3000 // Config button needs to be pressed for 3 secs to enter Config mode
 
 SensorType currentSensor;
 ESP8266WebServer server(80);
@@ -91,118 +93,123 @@ ESP8266HTTPUpdateServer httpUpdater;
 ConfigData config;
 
 /**** Group Variables ******/
-//Avaialble sender groups - the groups defines what purpose the sensor is used for 
+// Avaialble sender groups - the groups defines what purpose the sensor is used for
 #define GROUP_SWITCH 1 // Window or door detect
 #define GROUP_HT 2     // sends all available sensors for now , generally for temp controled applications
-#define GROUP_MOTION 3 // PIR controll sensors for security alarms  
-#define GROUP_LIGHT 4 // for light controlled applicatioons - must have a mux fitted 
-#define GROUP_SMOKE 5 // to interface with old Smoke alarms - the smoke alarm will be the trigger 
+#define GROUP_MOTION 3 // PIR controll sensors for security alarms
+#define GROUP_LIGHT 4  // for light controlled applicatioons - must have a mux fitted
+#define GROUP_SMOKE 5  // to interface with old Smoke alarms - the smoke alarm will be the trigger
 
 /**** Other Variables ******/
 #define longest_up_time 3000
-uint8_t receiverAddress[] = { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC };  // the hub receiver has a user defined "12:34:56:78:90:abc" mac address
+uint8_t receiverAddress[] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}; // the hub receiver has a user defined "12:34:56:78:90:abc" mac address
 bool ack_received = false;
 unsigned long start_time = millis();
-int mesh_id1 = 123456;  // default mesh address - will be overwritten by the LittleFS stored value
+int mesh_id1 = 123456; // default mesh address - will be overwritten by the LittleFS stored value
 byte category_id1;
 
 State currentState = INIT;
 
 /***** Structured messages *****/
 
-typedef struct Group_type {
+typedef struct Group_type
+{
   int mesh_id;
-  uint8_t sensor_id[6];  // the MAC address of this sender
+  uint8_t sensor_id[6]; // the MAC address of this sender
   byte category;
   bool status;
   float temperature;
   float humidity;
-  //float pressure; // If uncommented add to the Hub Structured messsage
+  // float pressure; // If uncommented add to the Hub Structured messsage
   float battery;
   float light;
-  //byte    wittyRGB; // for future use maybe // can utilise the tri colour LED and LDR - needs work in the HUB.
+  // byte    wittyRGB; // for future use maybe // can utilise the tri colour LED and LDR - needs work in the HUB.
 } Group_type;
 Group_type Now_msg;
 
 /* ############################ Setup ############################################ */
-void setup() {
+void setup()
+{
 
-#ifdef DEBUG_FLAG
   Serial.begin(115200);
-  Serial.println("");
-  Serial.println("Starting in debug mode.");
-#endif
+  debugPrintln("");
+  debugPrintln("Starting in debug mode.");
 
-  if (!LittleFS.begin()) {
-#ifdef DEBUG_FLAG
-    Serial.println("LittleFS mount failed.");
-#endif
+  if (!LittleFS.begin())
+  {
+
+    debugPrintln("LittleFS mount failed.");
+
     ESP.restart();
   }
 
-   
   // read config options from LittleFS
 
   File file = LittleFS.open(CONFIG_PATH, "r");
-  if (file) {
+  if (file)
+  {
     String content = file.readString();
     file.close();
 
     DynamicJsonDocument doc(256);
     DeserializationError err = deserializeJson(doc, content);
-    if (!err) {
-      config.mesh_id = doc["mesh"] | 123456;  //Use doc["mesh_id"] if it exists, otherwise default to 6734922
+    if (!err)
+    {
+      config.mesh_id = doc["mesh"] | 123456; // Use doc["mesh_id"] if it exists, otherwise default to 6734922
       config.category_id = doc["cat"] | 2;
-      
 
-      mesh_id1 = config.mesh_id;  //overwrite the MESH ID with what is stored in littleFS
+      mesh_id1 = config.mesh_id; // overwrite the MESH ID with what is stored in littleFS
       category_id1 = config.category_id;
- 
-#ifdef DEBUG_FLAG
-      Serial.println("Loaded config from LittleFS:");
-      Serial.print("Mesh ID: ");
-      Serial.println(config.mesh_id);
-      Serial.print("Category ID: ");
-      Serial.println(config.category_id);
-      Serial.print("Version: ");
-      Serial.println(version);
-      Serial.print("Date: ");
-      Serial.println(date);
-            
-      Serial.print("Raw config content: ");
-      Serial.println(content);
-#endif
-    } else {
-#ifdef DEBUG_FLAG
-      Serial.println("Failed to parse config JSON.");
-#endif
+
+      debugPrintln("Loaded config from LittleFS:");
+      debugPrint("Mesh ID: ");
+      debugPrintln(config.mesh_id);
+      debugPrint("Category ID: ");
+      debugPrintln(config.category_id);
+      debugPrint("Version: ");
+      debugPrintln(version);
+      debugPrint("Date: ");
+      debugPrintln(date);
+
+      debugPrint("Raw config content: ");
+      debugPrintln(content);
     }
-  } else {
-#ifdef DEBUG_FLAG
-    Serial.println("No config file found, entering config mode.");
-#endif
+    else
+    {
+
+      debugPrintln("Failed to parse config JSON.");
+    }
+  }
+  else
+  {
+
+    debugPrintln("No config file found, entering config mode.");
   }
 
-if (!loadWifiCredentials(config)) {
-    enterConfigMode();  // Force config mode even if pin is not LOW
+  if (!loadWifiCredentials(config))
+  {
+    enterConfigMode(); // Force config mode even if pin is not LOW
     return;
   }
-  
 
   pinMode(configPin, INPUT_PULLUP); // To enter Config mode Pull this pin low, via a 10k resistor to gnd
-  pinMode(switchPin, INPUT);
+
   pinMode(ledPin, OUTPUT);
-  pinMode(muxSel, OUTPUT);
-  digitalWrite(donePin, HIGH);  //Important for it to work. This line needs to be before the pinMode assignment ??? JSR 9/11/2024
-  pinMode(donePin, OUTPUT);
+
+  if (config.sensor_type != SENSOR_WITTY)
+  { // if using a witty board these pin assigments are not used
+    pinMode(switchPin, INPUT);
+    pinMode(muxSel, OUTPUT);
+    digitalWrite(donePin, HIGH); // Important for it to work. This line needs to be before the pinMode assignment ??? JSR 9/11/2024
+    pinMode(donePin, OUTPUT);
+  }
   digitalWrite(ledPin, LOW);
   digitalWrite(muxSel, LOW);
 
-  
- 
   ack_received = false;
   WiFi.mode(WIFI_STA);
-  if (esp_now_init() != 0) {
+  if (esp_now_init() != 0)
+  {
     delay(100);
     ESP.restart();
   }
@@ -215,131 +222,183 @@ if (!loadWifiCredentials(config)) {
 /* ##############################end of setup ################################### */
 /* ################################### Loop ##################################### */
 
-void loop() {
-  if (digitalRead(configPin) == LOW) {
-    
-  loadWifiCredentials(config);
-  initSensor(static_cast<SensorType>(config.sensor_type));
-   enterConfigMode();
-}
-#ifdef DEBUG_FLAG
+void loop()
+{
+  if (config.sensor_type == SENSOR_WITTY)
+  {
+    static bool lastSwitchState = digitalRead(switchPin); // Initial state
+    bool currentSwitchState = digitalRead(switchPin);
+
+    if (currentSwitchState != lastSwitchState)
+    {
+
+      debugPrint("Witty switch state changed to: ");
+      debugPrintln(currentSwitchState == LOW ? "LOW" : "HIGH");
+
+      // Flash onboard LED (D2)
+      digitalWrite(ledPin, HIGH);
+      delay(50); // Quick flash
+      digitalWrite(ledPin, LOW);
+
+      sendReading(); // Send ESP-NOW message on state change
+      lastSwitchState = currentSwitchState;
+    }
+
+    delay(100); // Debounce
+  }
+
+  if (digitalRead(configPin) == LOW)
+  {
+
+    loadWifiCredentials(config);
+    initSensor(static_cast<SensorType>(config.sensor_type));
+    enterConfigMode();
+  }
+
   logState(currentState);
-#endif
 
-  switch (currentState) {
-    case INIT:
-      sendReading();
-      currentState = WAIT_FOR_ACK;
-      break;
+  switch (currentState)
+  {
+  case INIT:
+    sendReading();
+    currentState = WAIT_FOR_ACK;
+    break;
 
-    case WAIT_FOR_ACK:
-      if (ack_received) {
-        currentState = SLEEP;
-      } else if (millis() - start_time >= longest_up_time) {
-        currentState = CHECK_TIMEOUT;
-      }
-      break;
+  case WAIT_FOR_ACK:
+    if (ack_received)
+    {
+      currentState = SLEEP;
+    }
+    else if (millis() - start_time >= longest_up_time)
+    {
+      currentState = CHECK_TIMEOUT;
+    }
+    break;
 
-    case CHECK_TIMEOUT:
-      if (digitalRead(configPin) == LOW) {
-        currentState = SLEEP;
-      } else if (millis() - start_time > CONFIG_MODE_TIMEOUT) {
-        currentState = ENTER_CONFIG_MODE;
-      }
-      break;
+  case CHECK_TIMEOUT:
+    if (digitalRead(configPin) == LOW)
+    {
+      currentState = SLEEP;
+    }
+    else if (millis() - start_time > CONFIG_MODE_TIMEOUT)
+    {
+      currentState = ENTER_CONFIG_MODE;
+    }
+    break;
 
-    case ENTER_CONFIG_MODE:
-      enterConfigMode();  // this blocks and reboots after 5 minutes
-      break;
+  case ENTER_CONFIG_MODE:
+    enterConfigMode(); // this blocks and reboots after 5 minutes
+    break;
 
-    case SLEEP:
-      gotoSleep();  // this turns off power or enters deep sleep
-      break;
+  case SLEEP:
+    gotoSleep(); // this turns off power or enters deep sleep
+    break;
   }
 }
 
 /* ############################End of Loop ##################################### */
 // put function definitions here:
-void sendReading() {
-	
+void sendReading()
+{
+
   /**** Create the ESPnow message values ******/
   Now_msg.mesh_id = mesh_id1;
-  Now_msg.category = category_id1;  // Change the Group name to what is appropriate for this sender
+  Now_msg.category = category_id1; // Change the Group name to what is appropriate for this sender
   WiFi.macAddress(Now_msg.sensor_id);
-  Now_msg.status = digitalRead(switchPin);  //reads the value of the PIR or other input that woke the board up
-  //Add sensor readings to ESP now message 
+  Now_msg.status = digitalRead(switchPin); // reads the value of the PIR or other input that woke the board up
+  // Add sensor readings to ESP now message
   float temperature = 0.0;
   float humidity = 0.0;
   readSensor(static_cast<SensorType>(config.sensor_type), temperature, humidity);
 
   Now_msg.temperature = temperature;
-  Now_msg.humidity = humidity; //on BMP280 and other temp sensors this is not avaialble
-//we are noot currently using the pressure reading from the BMx devices 
+  Now_msg.humidity = humidity; // on BMP280 and other temp sensors this is not avaialble
+  // we are noot currently using the pressure reading from the BMx devices
 
-  digitalWrite(muxSel, LOW); // just to make sure we are reading the Voltage 
-  delay(5);                                     // Allow settling time
-  Now_msg.battery = readBatteryVoltage();
+  digitalWrite(muxSel, LOW); // just to make sure we are reading the Voltage
+  delay(5);                  // Allow settling time
+  if (config.sensor_type != SENSOR_WITTY)
+    Now_msg.battery = readBatteryVoltage();
 
-  //now read the light level if the LDR is enabled 
+  // now read the light level if the LDR is enabled
   Now_msg.light = readLDRSensor(config.ldr_enabled);
   /**** Create the ESPnow message values end ******/
 
   // now send the ESPnow meassage
-  esp_now_send(receiverAddress, (uint8_t*)&Now_msg, sizeof(Now_msg));
+  esp_now_send(receiverAddress, (uint8_t *)&Now_msg, sizeof(Now_msg));
 }
-// It doesn't verify the message just reports that it was sent 
-void OnDataSent(uint8_t* mac_addr, uint8_t sendStatus) {
-  ack_received = (sendStatus == 0);  // 0 = success
-#ifdef DEBUG_FLAG
-  Serial.print("ESP-NOW send status: ");
-  Serial.println(sendStatus == 0 ? "Success" : "Fail");
-#endif
+// It doesn't verify the message just reports that it was sent
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus)
+{
+  ack_received = (sendStatus == 0); // 0 = success
+
+  debugPrint("ESP-NOW send status: ");
+  debugPrintln(sendStatus == 0 ? "Success" : "Fail");
 }
 
-void gotoSleep() {
-  if (digitalRead(configPin) == HIGH) {
-    digitalWrite(donePin, LOW);  // This pin disables the 3.3V supply to the ESP12 or ESP02.
-    delay(10);
-#ifdef DEBUG_FLAG
-    Serial.println("Message sent - going to sleep...");
-#endif
-    ESP.deepSleep(0);  //doesn't do anything as the power to the ESP has been removed
-  } else {
+void gotoSleep()
+{
+  if (digitalRead(configPin) == HIGH)
+  {
+    if (config.sensor_type != SENSOR_WITTY)
+    {
+      digitalWrite(donePin, LOW); // This pin disables the 3.3V supply to the ESP12 or ESP02.
+      delay(10);                  // if programmed into a witty board there is no donePin output
 
-    if (millis() - start_time > CONFIG_MODE_TIMEOUT) {
-      #ifdef DEBUG_FLAG
-      Serial.print("ConfigPin State ");
-      Serial.println(digitalRead(configPin));
-      #endif
+      debugPrintln("Message sent - going to sleep...");
+
+      ESP.deepSleep(0); // doesn't do anything as the power to the ESP has been removed
+    }
+  }
+  else
+  {
+
+    if (millis() - start_time > CONFIG_MODE_TIMEOUT)
+    {
+
+      debugPrint("ConfigPin State ");
+      debugPrintln(digitalRead(configPin));
+
       enterConfigMode();
       delay(10);
     }
   }
 }
 
-#ifdef DEBUG_FLAG
-void logState(State state) {
-  static State lastLoggedState = (State)-1;  // invalid initial state to force first log
+void logState(State state)
+{
+  static State lastLoggedState = (State)-1; // invalid initial state to force first log
 
-  if (state != lastLoggedState) {
+  if (state != lastLoggedState)
+  {
     lastLoggedState = state;
 
-    switch (state) {
-      case INIT: Serial.println("State: INIT"); break;
-      case WAIT_FOR_ACK: Serial.println("State: WAIT_FOR_ACK"); break;
-      case CHECK_TIMEOUT: Serial.println("State: CHECK_TIMEOUT"); break;
-      case ENTER_CONFIG_MODE: Serial.println("State: ENTER_CONFIG_MODE"); break;
-      case SLEEP: Serial.println("State: SLEEP"); break;
+    switch (state)
+    {
+    case INIT:
+      debugPrintln("State: INIT");
+      break;
+    case WAIT_FOR_ACK:
+      debugPrintln("State: WAIT_FOR_ACK");
+      break;
+    case CHECK_TIMEOUT:
+      debugPrintln("State: CHECK_TIMEOUT");
+      break;
+    case ENTER_CONFIG_MODE:
+      debugPrintln("State: ENTER_CONFIG_MODE");
+      break;
+    case SLEEP:
+      debugPrintln("State: SLEEP");
+      break;
     }
   }
 }
-#endif
 
-float readBatteryVoltage() {
+float readBatteryVoltage()
+{
   digitalWrite(muxSel, LOW);
   delay(5);
   int raw = analogRead(MUX_Z);
   float v = raw * (1 / 1023.0);
   return v * 4.3;
 }
-

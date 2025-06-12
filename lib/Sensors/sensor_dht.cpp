@@ -1,7 +1,7 @@
 #include "sensor_dht.h"
 #include <DHT.h>
 
-#define DHTPIN 2       // GPIO where your DHT is connected
+#define DHTPIN  4       // GPIO where your DHT is connected
 #define DHTTYPE DHT22  // DHT22 or DHT11
 
 DHT* dht = nullptr;

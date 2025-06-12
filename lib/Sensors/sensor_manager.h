@@ -10,8 +10,12 @@
 #include "sensor_bmp280.h"
 #include "sensor_bmp180.h"
 #include "sensor_ds18b20.h"
+#ifdef SENSOR_WITTY
+#include "sensor_witty.h"
+#endif
 #include "sensor_mlx90614.h"
 #include "sensor_ldr.h"
+
 
 // Active sensor init + read
 void initSensor(SensorType type);

@@ -1,5 +1,9 @@
 #include "sensor_manager.h"
 #include "sensor_types.h"
+#ifdef SENSOR_WITTY
+#include "sensor_witty.h"
+#endif
+
 
 // Track the currently active sensor
 SensorType activeSensor = SENSOR_NONE;
@@ -13,8 +17,10 @@ void initSensor(SensorType type) {
     case SENSOR_BMP280:     initBMP280(); break;
     case SENSOR_BMP180:     initBMP180(); break;
     case SENSOR_DS18B20:    initDS18B20(); break;
+    #ifdef SENSOR_WITTY
+    case SENSOR_WITTY:      initWitty(); break;
+    #endif
     case SENSOR_MLX90614:   initMLX90614(); break;
-    
     case SENSOR_NONE:
     default: break;
   }

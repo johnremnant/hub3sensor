@@ -29,12 +29,13 @@
     <input type="submit" value="Save Config">
   </form>
 
-   <p id="timeoutWarning" style="font-weight:bold; color:red;"></p>
+  <p id="timeoutWarning" style="font-weight:bold; color:red;"></p>
 
   <hr>
   <a href="/update.html">Firmware Update</a>
 
   <script>
+    // Countdown timer for page shutdown
     const duration = 180;
     let remaining = duration;
 
@@ -51,6 +52,27 @@
           "Shutting down...";
       }
     }, 1000);
+
+    // Auto-enable and lock LDR when SENSOR_WITTY is selected
+    document.addEventListener("DOMContentLoaded", function() {
+      const sensorSelect = document.getElementById("sensor");
+      const ldrSelect = document.getElementById("ldr");
+      const SENSOR_WITTY = 6; // adjust if enum value changes
+
+      function updateLdrState() {
+        const selected = parseInt(sensorSelect.value);
+        if (selected === SENSOR_WITTY) {
+          ldrSelect.value = "1";
+          ldrSelect.disabled = true;
+        } else {
+          ldrSelect.disabled = false;
+        }
+      }
+
+      sensorSelect.addEventListener("change", updateLdrState);
+      updateLdrState();
+    });
   </script>
+
 </body>
 </html>
